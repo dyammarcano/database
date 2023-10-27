@@ -1,0 +1,1 @@
+# database helpers for Oracle, MySQL, PostgreSQL, SQLite, SQL Server, and DB2
