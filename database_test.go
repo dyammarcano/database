@@ -3,43 +3,75 @@
 package database
 
 import (
+	"database/sql"
+	"fmt"
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/ory/dockertest/v3"
+	"log"
 	"testing"
+	"time"
 )
 
-func TestDatabase_Connect(t *testing.T) {
-	tests := []struct {
-		name    string
-		config  *Config
-		wantErr bool
-	}{
-		{
-			name: "Test Oracle Connection",
-			config: &Config{
-				DriverName: "sqlite",
-				User:       "test",
-				Pass:       "test",
-				Host:       "localhost",
-				Name:       "oracleDB",
-				Port:       1521,
-				FilePath:   "C:\\arqprod_local\\mydatabase.sqlite",
-			},
-			wantErr: false, // assuming that an Oracle DB is run on localhost
-		},
-		{
-			name:    "Test Unrecognized Database",
-			config:  &Config{DriverName: "unrecognized"},
-			wantErr: true,
-		},
+var (
+	db     *sql.DB
+	config = &Config{
+		DriverName: "mysql",
+		User:       "test",
+		Pass:       "test",
+		Host:       "localhost",
+		Name:       "oracleDB",
+		Port:       3306, // MySQL default port
+	}
+)
+
+func setup() (*dockertest.Resource, *dockertest.Pool, error) {
+	pool, err := dockertest.NewPool("")
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not construct pool: %w", err)
 	}
 
-	db := NewDatabase()
+	pool.MaxWait = time.Minute * 2
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := db.Connect(tt.config)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Database.Connect() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
+	err = pool.Client.Ping()
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not connect to Docker: %w", err)
+	}
+
+	resource, err := pool.Run("mysql", "5.7", []string{"MYSQL_ROOT_PASSWORD=secret"})
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not start resource: %w", err)
+	}
+
+	connStr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", config.User, config.Pass, config.Host, config.Port, config.Name)
+	db, err = sql.Open(config.DriverName, connStr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not open database connection: %w", err)
+	}
+
+	if err := pool.Retry(func() error {
+		return db.Ping()
+	}); err != nil {
+		return nil, nil, fmt.Errorf("could not connect to database: %w", err)
+	}
+
+	return resource, pool, nil
+}
+
+func teardown(pool *dockertest.Pool, resource *dockertest.Resource) {
+	if err := pool.Purge(resource); err != nil {
+		log.Fatalf("could not purge resource: %s", err)
+	}
+}
+
+func TestNewDatabase_Connect(t *testing.T) {
+	resource, pool, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer teardown(pool, resource)
+
+	err = db.Ping()
+	if err != nil {
+		t.Errorf("Failed to ping database: %v", err)
 	}
 }

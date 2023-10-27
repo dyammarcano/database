@@ -4,11 +4,11 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
-	_ "github.com/IBM/go_ibm_db"
-	_ "github.com/denisenkom/go-mssqldb"
+	//_ "github.com/IBM/go_ibm_db"
+	//_ "github.com/denisenkom/go-mssqldb"
 	"github.com/godror/godror"
 	_ "github.com/godror/godror"
-	"gorm.io/driver/db2"
+	//"gorm.io/driver/db2"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
@@ -55,9 +55,9 @@ func (db *database) Connect(config *Config) (*gorm.DB, error) {
 	case "sqlserver":
 		dsn := fmt.Sprintf("sqlserver://%s:%s@%s:%d?database=%s", config.User, config.Pass, config.Host, config.Port, config.Name)
 		dialector = sqlserver.Open(dsn)
-	case "db2":
-		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", config.Host, config.Port, config.User, config.Pass, config.Name)
-		dialector = db2.Open(dsn)
+	//case "db2":
+	//	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", config.Host, config.Port, config.User, config.Pass, config.Name)
+	//	dialector = db2.Open(dsn)
 	default:
 		return nil, fmt.Errorf("invalid database driver: %s", config.DriverName)
 	}
