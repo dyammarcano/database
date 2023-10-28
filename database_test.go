@@ -7,6 +7,7 @@ import (
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/ory/dockertest/v3"
+	"github.com/stretchr/testify/assert"
 	"log"
 	"testing"
 	"time"
@@ -16,11 +17,10 @@ var (
 	db     *sql.DB
 	config = &Config{
 		DriverName: "mysql",
-		User:       "test",
-		Pass:       "test",
+		User:       "root",
+		Pass:       "secret",
 		Host:       "localhost",
-		Name:       "oracleDB",
-		Port:       3306, // MySQL default port
+		Name:       "mysql",
 	}
 )
 
@@ -32,8 +32,7 @@ func setup() (*dockertest.Resource, *dockertest.Pool, error) {
 
 	pool.MaxWait = time.Minute * 2
 
-	err = pool.Client.Ping()
-	if err != nil {
+	if err = pool.Client.Ping(); err != nil {
 		return nil, nil, fmt.Errorf("could not connect to Docker: %w", err)
 	}
 
@@ -42,16 +41,18 @@ func setup() (*dockertest.Resource, *dockertest.Pool, error) {
 		return nil, nil, fmt.Errorf("could not start resource: %w", err)
 	}
 
-	connStr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", config.User, config.Pass, config.Host, config.Port, config.Name)
-	db, err = sql.Open(config.DriverName, connStr)
-	if err != nil {
-		return nil, nil, fmt.Errorf("could not open database connection: %w", err)
-	}
+	newDatabase := NewDatabase()
+	config.Port = resource.GetPort("3306/tcp")
 
 	if err := pool.Retry(func() error {
+		var err error
+		db, err = newDatabase.Connect(config)
+		if err != nil {
+			return err
+		}
 		return db.Ping()
 	}); err != nil {
-		return nil, nil, fmt.Errorf("could not connect to database: %w", err)
+		return nil, nil, fmt.Errorf("could not connect to Database: %w", err)
 	}
 
 	return resource, pool, nil
@@ -65,13 +66,39 @@ func teardown(pool *dockertest.Pool, resource *dockertest.Resource) {
 
 func TestNewDatabase_Connect(t *testing.T) {
 	resource, pool, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.Nil(t, err)
+
 	defer teardown(pool, resource)
 
-	err = db.Ping()
-	if err != nil {
-		t.Errorf("Failed to ping database: %v", err)
+	//create table
+	_, err = db.Exec("CREATE TABLE IF NOT EXISTS `users` (`id` int(11) NOT NULL AUTO_INCREMENT,`name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,`email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,`password` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,PRIMARY KEY (`id`)) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;")
+	assert.Nil(t, err)
+
+	//insert
+	_, err = db.Exec("INSERT INTO `users` (`name`, `email`, `password`) VALUES ('John Doe', 'john-doe@email.com', 'supersecret')")
+	assert.Nil(t, err)
+
+	//select
+	rows, err := db.Query("SELECT * FROM `users`")
+	assert.Nil(t, err)
+
+	for rows.Next() {
+		var id int
+		var name string
+		var email string
+		var password string
+		err = rows.Scan(&id, &name, &email, &password)
+		assert.Nil(t, err)
+		assert.Equal(t, "John Doe", name)
 	}
+
+	//delete
+	_, err = db.Exec("DELETE FROM `users` WHERE `name` = 'John Doe'")
+	assert.Nil(t, err)
+
+	//select
+	rows, err = db.Query("SELECT * FROM `users`")
+	assert.Nil(t, err)
+
+	assert.True(t, !rows.Next())
 }

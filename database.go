@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-type Database interface {
-	Connect(config *Config) (*gorm.DB, error)
+type Interface interface {
+	Connect(config *Config) (*sql.DB, error)
 }
 
 type Config struct {
@@ -28,24 +28,24 @@ type Config struct {
 	Pass       string
 	Host       string
 	Name       string
-	Port       int
+	Port       string
 }
 
-type database struct{}
+type Database struct{}
 
-func NewDatabase() Database {
-	return &database{}
+func NewDatabase() *Database {
+	return &Database{}
 }
 
-func (db *database) Connect(config *Config) (*gorm.DB, error) {
+func (db *Database) Connect(config *Config) (*sql.DB, error) {
 	var dialector gorm.Dialector
 
 	switch config.DriverName {
 	case "mysql":
-		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", config.User, config.Pass, config.Host, config.Port, config.Name)
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true", config.User, config.Pass, config.Host, config.Port, config.Name)
 		dialector = mysql.Open(dsn)
 	case "postgres":
-		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", config.Host, config.Port, config.User, config.Pass, config.Name)
+		dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", config.Host, config.Port, config.User, config.Pass, config.Name)
 		dialector = postgres.Open(dsn)
 	case "sqlite":
 		dialector = sqlite.Open(config.FilePath)
@@ -53,13 +53,13 @@ func (db *database) Connect(config *Config) (*gorm.DB, error) {
 		params := connectParamsFromConfig(config)
 		dialector = postgres.New(postgres.Config{Conn: sql.OpenDB(params)})
 	case "sqlserver":
-		dsn := fmt.Sprintf("sqlserver://%s:%s@%s:%d?database=%s", config.User, config.Pass, config.Host, config.Port, config.Name)
+		dsn := fmt.Sprintf("sqlserver://%s:%s@%s:%s?Database=%s", config.User, config.Pass, config.Host, config.Port, config.Name)
 		dialector = sqlserver.Open(dsn)
 	//case "db2":
 	//	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", config.Host, config.Port, config.User, config.Pass, config.Name)
 	//	dialector = db2.Open(dsn)
 	default:
-		return nil, fmt.Errorf("invalid database driver: %s", config.DriverName)
+		return nil, fmt.Errorf("invalid Database driver: %s", config.DriverName)
 	}
 
 	dbInstance, err := gorm.Open(dialector, &gorm.Config{})
@@ -72,18 +72,20 @@ func (db *database) Connect(config *Config) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetMaxOpenConns(100)
-	sqlDB.SetConnMaxLifetime(time.Hour)
+	if config.DriverName != "sqlite" {
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetMaxOpenConns(100)
+		sqlDB.SetConnMaxLifetime(time.Hour)
+	}
 
-	return dbInstance, nil
+	return sqlDB, nil
 }
 
 func connectParamsFromConfig(cfg *Config) driver.Connector {
 	var params godror.ConnectionParams
 	params.Username = cfg.User
 	params.Password = godror.NewPassword(cfg.Pass)
-	params.ConnectString = fmt.Sprintf("%s:%d/%s?connect_timeout=2", cfg.Host, cfg.Port, cfg.Name)
+	params.ConnectString = fmt.Sprintf("%s:%s/%s?connect_timeout=2", cfg.Host, cfg.Port, cfg.Name)
 	params.SessionTimeout = 42 * time.Second
 	params.Timezone = time.Local
 
